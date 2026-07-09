@@ -44,7 +44,7 @@ class CEOAgent(BaseAgent):
                     continue # Skip malformed lines for prototype simplicity
         return tasks
 
-    def execute(self, idea: StartupIdea, context: Optional[List[Message]] = None) -> Message:
+    def execute(self, idea: StartupIdea, context: Optional[List[Message]] = None, task: Optional['Task'] = None) -> Message:
         system_prompt = self._load_prompt()
         user_prompt = f"Startup Idea: {idea.title}\nDescription: {idea.description}\nIndustry: {idea.industry or 'Unknown'}"
         

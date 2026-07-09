@@ -16,13 +16,14 @@ class BaseAgent(ABC):
         self.memory: List[Message] = []
         
     @abstractmethod
-    def execute(self, idea: StartupIdea, context: Optional[List[Message]] = None) -> Message:
+    def execute(self, idea: StartupIdea, context: Optional[List[Message]] = None, task: Optional['Task'] = None) -> Message:
         """
         Execute the agent's primary function based on the startup idea and current context.
         
         Args:
             idea: The user's startup idea.
             context: A list of messages representing the conversation or work history.
+            task: An optional specific Task assigned to this agent.
             
         Returns:
             A Message containing the agent's output.
