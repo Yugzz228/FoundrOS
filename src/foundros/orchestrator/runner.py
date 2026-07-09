@@ -1,23 +1,29 @@
-"""Synchronous workflow orchestrator for Prototype v1.0."""
+"""Asynchronous Event-Driven workflow orchestrator for Prototype v2.0."""
 
+import asyncio
 import logging
-from typing import List, Dict
+from typing import List, Any
 from foundros.models.idea import StartupIdea
 from foundros.models.message import Message
-from foundros.services.llm import LLMService
+from foundros.models.task import Task
+from foundros.services.llm import AsyncLLMService
 from foundros.agents.ceo import CEOAgent
 from foundros.agents.executive import ExecutiveAgent
+from foundros.communication.bus import EventBus
+from foundros.memory.buffer import MemoryManager
 
 logger = logging.getLogger(__name__)
 
 class Orchestrator:
-    """Runs the full FoundrOS simulation pipeline."""
+    """Runs the full FoundrOS simulation pipeline asynchronously."""
     
-    def __init__(self, llm_service: LLMService):
+    def __init__(self, llm_service: AsyncLLMService):
         self.llm_service = llm_service
-        self.ceo = CEOAgent(llm_service)
+        self.bus = EventBus()
+        self.memory = MemoryManager(llm_service, max_messages=15)
         
-        # Factory instantiated executives
+        # Instantiate Agents
+        self.ceo = CEOAgent(llm_service)
         self.executives = {
             "CTO": ExecutiveAgent("CTO", "Chief Technology Officer", "cto.md", llm_service),
             "PM": ExecutiveAgent("PM", "Product Manager", "pm.md", llm_service),
@@ -25,49 +31,89 @@ class Orchestrator:
         }
         self.investor = ExecutiveAgent("Investor", "Venture Capitalist", "investor.md", llm_service)
         
-        self.context: List[Message] = []
+        # State tracking
+        self.active_tasks = 0
+        self.simulation_complete_event = asyncio.Event()
+        self.final_report = ""
         
-    def run(self, idea: StartupIdea) -> str:
-        """Executes the full simulation given a startup idea."""
-        logger.info(f"Starting FoundrOS simulation for: {idea.title}")
+        # Setup Event Subscriptions
+        self._setup_subscriptions()
         
-        # Step 1: CEO breaks down tasks
-        logger.info("CEO is analyzing the idea and delegating tasks...")
-        ceo_message = self.ceo.execute(idea)
-        self.context.append(ceo_message)
+    def _setup_subscriptions(self):
+        self.bus.subscribe("IdeaSubmitted", self._handle_idea_submitted)
+        self.bus.subscribe("TasksDelegated", self._handle_tasks_delegated)
+        self.bus.subscribe("ExecutiveTaskCompleted", self._handle_executive_completed)
+        self.bus.subscribe("AllTasksCompleted", self._handle_all_tasks_completed)
         
-        # The CEO agent parses tasks internally. We can retrieve them.
-        tasks = self.ceo._parse_tasks(ceo_message.content)
-        logger.info(f"CEO generated {len(tasks)} tasks.")
+    async def run(self, idea: StartupIdea) -> str:
+        """Starts the event-driven simulation and waits for completion."""
+        logger.info(f"Starting async FoundrOS simulation for: {idea.title}")
         
-        # Step 2: Executives execute their tasks
-        for task in tasks:
+        # Kick off the event pipeline
+        await self.bus.publish("IdeaSubmitted", idea)
+        
+        # Wait until the investor finishes and triggers the complete event
+        await self.simulation_complete_event.wait()
+        return self.final_report
+
+    async def _handle_idea_submitted(self, idea: StartupIdea):
+        logger.info("CEO is analyzing the idea and generating structured tasks...")
+        plan = await self.ceo.execute(idea)
+        
+        # We store CEO's output as a system message in memory
+        tasks_str = "\n".join([f"- {t.assignee_role}: {t.title}" for t in plan.tasks])
+        msg = Message(role="assistant", agent_name="CEO", content=f"Delegated Tasks:\n{tasks_str}")
+        self.memory.add_message(msg)
+        
+        logger.info(f"CEO generated {len(plan.tasks)} tasks.")
+        await self.bus.publish("TasksDelegated", {"idea": idea, "tasks": plan.tasks})
+
+    async def _handle_tasks_delegated(self, payload: dict):
+        idea = payload["idea"]
+        tasks: List[Task] = payload["tasks"]
+        self.active_tasks = len(tasks)
+        
+        # Execute all executives in parallel
+        async def _run_agent(task: Task):
             if task.assignee_role in self.executives:
                 agent = self.executives[task.assignee_role]
                 logger.info(f"{task.assignee_role} is executing task: {task.title}")
-                msg = agent.execute(idea, context=self.context, task=task)
-                self.context.append(msg)
+                msg = await agent.execute(idea, context=self.memory.get_context(), task=task)
+                await self.bus.publish("ExecutiveTaskCompleted", msg)
             else:
                 logger.warning(f"Unknown assignee role: {task.assignee_role}")
-                
-        # Step 3: Investor reviews the final output
-        logger.info("Investor is reviewing the final output...")
-        investor_message = self.investor.execute(idea, context=self.context)
-        self.context.append(investor_message)
+                self.active_tasks -= 1
+
+        # Fire and forget the tasks concurrently
+        await asyncio.gather(*(_run_agent(task) for task in tasks))
+
+    async def _handle_executive_completed(self, msg: Message):
+        self.memory.add_message(msg)
+        self.active_tasks -= 1
+        logger.info(f"{msg.agent_name} completed their task. {self.active_tasks} tasks remaining.")
         
-        # Step 4: Compile the final report
+        await self.memory.compress_if_needed()
+        
+        if self.active_tasks <= 0:
+            await self.bus.publish("AllTasksCompleted", None)
+
+    async def _handle_all_tasks_completed(self, payload: Any):
+        logger.info("All tasks completed. Investor is reviewing...")
+        dummy_idea = StartupIdea(title="Final Review", description="Reviewing output")
+        
+        investor_msg = await self.investor.execute(dummy_idea, context=self.memory.get_context())
+        self.memory.add_message(investor_msg)
+        
         logger.info("Simulation complete. Compiling report.")
-        return self._generate_report(idea)
-        
-    def _generate_report(self, idea: StartupIdea) -> str:
-        report = [
-            f"# FoundrOS Executive Report: {idea.title}",
-            f"**Industry:** {idea.industry or 'N/A'}",
-            f"**Description:** {idea.description}",
-            "---"
-        ]
-        
-        for msg in self.context:
+        self.final_report = self._generate_report()
+        self.simulation_complete_event.set()
+
+    def _generate_report(self) -> str:
+        report = ["# FoundrOS Final Executive Report", "---"]
+        if self.memory.summary:
+            report.append(f"**Context Summary:**\n{self.memory.summary}\n---")
+            
+        for msg in self.memory.buffer:
             role_header = f"## {msg.agent_name or msg.role.capitalize()}"
             report.append(role_header)
             report.append(msg.content)

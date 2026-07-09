@@ -1,37 +1,38 @@
-"""Tests for the Orchestrator."""
+"""Tests for the Async Orchestrator."""
 
 import pytest
+from typing import TypeVar, Type
+from pydantic import BaseModel
 from foundros.models.idea import StartupIdea
-from foundros.services.llm import LLMService
+from foundros.models.task import Task
+from foundros.models.delegation import DelegationPlan
+from foundros.services.llm import AsyncLLMService
 from foundros.orchestrator.runner import Orchestrator
 
-class MockLLMService(LLMService):
+T = TypeVar('T', bound=BaseModel)
+
+class MockAsyncLLMService(AsyncLLMService):
     def __init__(self):
         pass
-    def generate_response(self, system_prompt: str, user_prompt: str) -> str:
-        # Mocking the CEO specifically to generate tasks so the loop executes
-        if "Chief Executive Officer" in system_prompt:
-            return (
-                "- CTO: Database - Design schema\n"
-                "- PM: PRD - Write features\n"
-            )
+    async def generate_response(self, system_prompt: str, user_prompt: str) -> str:
         return "Mock execution output."
+        
+    async def generate_structured_response(self, system_prompt: str, user_prompt: str, response_model: Type[T]) -> T:
+        plan = DelegationPlan(tasks=[
+            Task(title="DB", description="Design DB", assignee_role="CTO"),
+            Task(title="PRD", description="Write PRD", assignee_role="PM")
+        ])
+        return plan # type: ignore
 
-def test_orchestrator_run():
-    llm = MockLLMService()
+@pytest.mark.asyncio
+async def test_async_orchestrator_run():
+    llm = MockAsyncLLMService()
     orchestrator = Orchestrator(llm_service=llm)
     
     idea = StartupIdea(title="Test", description="Test Idea", industry="Tech")
+    report = await orchestrator.run(idea)
     
-    report = orchestrator.run(idea)
-    
-    assert "FoundrOS Executive Report: Test" in report
+    assert "FoundrOS Final Executive Report" in report
     assert "Mock execution output." in report
-    
-    # The context should contain CEO, CTO, PM, and Investor messages
-    agent_names = [msg.agent_name for msg in orchestrator.context]
-    assert "CEO" in agent_names
-    assert "CTO" in agent_names
-    assert "PM" in agent_names
-    assert "CFO" not in agent_names # CEO didn't delegate to CFO in mock
-    assert "Investor" in agent_names
+    assert "CTO" in report
+    assert "PM" in report

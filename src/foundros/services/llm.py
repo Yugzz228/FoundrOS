@@ -1,33 +1,37 @@
-"""LLM Service wrapper."""
+"""LLM Service wrapper for FoundrOS."""
 
-import os
-from openai import OpenAI
+from typing import TypeVar, Type, Optional
+from pydantic import BaseModel
+from openai import AsyncOpenAI
 
-class LLMService:
-    """A simple synchronous wrapper around the OpenAI client."""
+T = TypeVar('T', bound=BaseModel)
+
+class AsyncLLMService:
+    """A wrapper for interacting with Async LLM providers."""
     
-    def __init__(self, api_key: str = None, model: str = "gpt-4o-mini"):
-        # Uses OPENAI_API_KEY from environment if not explicitly provided
-        self.client = OpenAI(api_key=api_key)
-        self.model = model
+    def __init__(self, api_key: Optional[str] = None):
+        self.client = AsyncOpenAI(api_key=api_key)
+        self.model = "gpt-4o-mini"
         
-    def generate_response(self, system_prompt: str, user_prompt: str) -> str:
-        """
-        Generate a text response from the LLM.
+    async def generate_response(self, system_prompt: str, user_prompt: str) -> str:
+        """Generates a standard string response."""
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        return response.choices[0].message.content or ""
         
-        Args:
-            system_prompt: The agent's core instructions.
-            user_prompt: The specific task or context for this execution.
-            
-        Returns:
-            The raw string response from the LLM.
-        """
-        response = self.client.chat.completions.create(
+    async def generate_structured_response(self, system_prompt: str, user_prompt: str, response_model: Type[T]) -> T:
+        """Generates a strictly structured response using a Pydantic model."""
+        response = await self.client.beta.chat.completions.parse(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.7
+            response_format=response_model
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.parsed

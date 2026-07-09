@@ -1,14 +1,13 @@
-"""BaseAgent interface."""
+"""Base interface for all autonomous agents."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
-from foundros.models.message import Message
+from typing import List, Optional, Any
 from foundros.models.idea import StartupIdea
+from foundros.models.message import Message
+from foundros.models.task import Task
 
 class BaseAgent(ABC):
-    """
-    The abstract base class for all autonomous participants in FoundrOS.
-    """
+    """Abstract base class defining the standard interface for an Agent."""
     
     def __init__(self, name: str, role_description: str):
         self.name = name
@@ -16,16 +15,9 @@ class BaseAgent(ABC):
         self.memory: List[Message] = []
         
     @abstractmethod
-    def execute(self, idea: StartupIdea, context: Optional[List[Message]] = None, task: Optional['Task'] = None) -> Message:
+    async def execute(self, idea: StartupIdea, context: Optional[List[Message]] = None, task: Optional['Task'] = None) -> Any:
         """
-        Execute the agent's primary function based on the startup idea and current context.
-        
-        Args:
-            idea: The user's startup idea.
-            context: A list of messages representing the conversation or work history.
-            task: An optional specific Task assigned to this agent.
-            
-        Returns:
-            A Message containing the agent's output.
+        Asynchronously execute the agent's primary function.
+        Returns a Message or a list of Tasks.
         """
         pass
