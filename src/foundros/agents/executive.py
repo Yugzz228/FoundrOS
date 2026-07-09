@@ -1,4 +1,4 @@
-"""PM Agent implementation."""
+"""Generic Executive Agent implementation."""
 
 import os
 from typing import List, Optional
@@ -8,13 +8,13 @@ from foundros.models.message import Message
 from foundros.models.task import Task
 from foundros.services.llm import LLMService
 
-class PMAgent(BaseAgent):
-    """The PM Agent responsible for defining product requirements and scope."""
+class ExecutiveAgent(BaseAgent):
+    """A generic, configuration-driven agent for executive roles."""
     
-    def __init__(self, llm_service: LLMService):
-        super().__init__(name="PM", role_description="Product Manager")
+    def __init__(self, name: str, role_description: str, prompt_filename: str, llm_service: LLMService):
+        super().__init__(name=name, role_description=role_description)
         self.llm_service = llm_service
-        self.prompt_path = os.path.join(os.path.dirname(__file__), "..", "prompts", "pm.md")
+        self.prompt_path = os.path.join(os.path.dirname(__file__), "..", "prompts", prompt_filename)
         
     def _load_prompt(self) -> str:
         with open(self.prompt_path, "r", encoding="utf-8") as f:
@@ -29,7 +29,8 @@ class PMAgent(BaseAgent):
         if context:
             user_prompt += "\nAdditional Context:\n"
             for msg in context:
-                user_prompt += f"[{msg.role}]: {msg.content}\n"
+                agent_prefix = f"[{msg.agent_name}]" if msg.agent_name else f"[{msg.role}]"
+                user_prompt += f"{agent_prefix}:\n{msg.content}\n\n"
                 
         raw_response = self.llm_service.generate_response(system_prompt, user_prompt)
         

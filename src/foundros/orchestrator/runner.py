@@ -6,10 +6,7 @@ from foundros.models.idea import StartupIdea
 from foundros.models.message import Message
 from foundros.services.llm import LLMService
 from foundros.agents.ceo import CEOAgent
-from foundros.agents.cto import CTOAgent
-from foundros.agents.pm import PMAgent
-from foundros.agents.cfo import CFOAgent
-from foundros.agents.investor import InvestorAgent
+from foundros.agents.executive import ExecutiveAgent
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +16,15 @@ class Orchestrator:
     def __init__(self, llm_service: LLMService):
         self.llm_service = llm_service
         self.ceo = CEOAgent(llm_service)
+        
+        # Factory instantiated executives
         self.executives = {
-            "CTO": CTOAgent(llm_service),
-            "PM": PMAgent(llm_service),
-            "CFO": CFOAgent(llm_service)
+            "CTO": ExecutiveAgent("CTO", "Chief Technology Officer", "cto.md", llm_service),
+            "PM": ExecutiveAgent("PM", "Product Manager", "pm.md", llm_service),
+            "CFO": ExecutiveAgent("CFO", "Chief Financial Officer", "cfo.md", llm_service)
         }
-        self.investor = InvestorAgent(llm_service)
+        self.investor = ExecutiveAgent("Investor", "Venture Capitalist", "investor.md", llm_service)
+        
         self.context: List[Message] = []
         
     def run(self, idea: StartupIdea) -> str:
